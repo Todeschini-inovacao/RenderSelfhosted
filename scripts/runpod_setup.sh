@@ -16,15 +16,22 @@ WORKSPACE=${WORKSPACE:-/workspace}
 VENV=${VENV:-$WORKSPACE/venv}
 export HF_HOME=${HF_HOME:-$WORKSPACE/hf_cache}
 
-# torch com CUDA 13.0: a RTX 5090 (Blackwell, sm_120) precisa de build CUDA 12.8+. Mesma
-# versão de torch da base do docker/Dockerfile.
-TORCH_INDEX=https://download.pytorch.org/whl/cu130
+# Mesma versão de torch da base do docker/Dockerfile. Builds publicados pra 2.14.1: cu126
+# e cu130. cu130 exige driver 580+ e é o único que roda em Blackwell (RTX 50xx/PRO 6000,
+# sm_120); cu126 roda com driver 560+ em GPUs até Ada/Hopper (4090, 6000 Ada, L40S, H100).
+# O check de arquitetura mais abaixo falha com mensagem clara se a combinação não servir.
 TORCH_VERSION=2.14.1
 
 cd "$(dirname "$0")/.."
 
 echo "== GPU"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+DRIVER_MAJOR=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1 | cut -d. -f1)
+if [ -z "${TORCH_CUDA:-}" ]; then
+    if [ "$DRIVER_MAJOR" -ge 580 ]; then TORCH_CUDA=cu130; else TORCH_CUDA=cu126; fi
+fi
+TORCH_INDEX=https://download.pytorch.org/whl/$TORCH_CUDA
+echo "Driver $DRIVER_MAJOR -> torch $TORCH_VERSION+$TORCH_CUDA"
 
 if [ ! -x "$VENV/bin/python" ]; then
     echo "== Criando venv em $VENV"
@@ -32,7 +39,7 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 PY="$VENV/bin/python"
 
-echo "== Instalando torch $TORCH_VERSION (cu130) e dependências"
+echo "== Instalando torch $TORCH_VERSION ($TORCH_CUDA) e dependências"
 "$PY" -m pip install --upgrade pip
 "$PY" -m pip install "torch==$TORCH_VERSION" torchvision --index-url "$TORCH_INDEX"
 "$PY" -m pip install -r requirements-gpu.txt
