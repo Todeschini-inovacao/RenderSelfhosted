@@ -5,11 +5,11 @@ Classe confirmada no model card oficial (huggingface.co/Qwen/Qwen-Image-Edit-251
 `pip install git+https://github.com/huggingface/diffusers` que o card sugere (isso é
 só cautela genérica de lançamento, antes da classe virar release estável).
 
-VRAM por precisão (ver README.md seção 4/5 deste repo): bf16 completo pede ~40GB+;
-entre ~18GB e 40GB, quantizar -- fp8 (torchao) preserva mais qualidade que nf4, mas
-exige GPU com suporte a FP8 (Ampere ou mais nova; a maioria das GPUs de consumo
-recentes serve); nf4 (bitsandbytes) funciona em qualquer GPU CUDA. Os limiares abaixo
-são ponto de partida -- ajustar depois do benchmark (SPEC.md E6) com a GPU real.
+VRAM por precisão: bf16 completo pede ~64GB (pesos ~58GB + ativações); entre ~18GB e
+64GB, quantizar -- fp8 (torchao) preserva mais qualidade que nf4, mas exige GPU com
+compute capability 8.9+ (Ada/RTX 40xx, Hopper, Blackwell/RTX 50xx); nf4 (bitsandbytes)
+funciona em qualquer GPU CUDA. Os limiares abaixo são ponto de partida -- ajustar depois
+do benchmark (SPEC.md E6) com a GPU real.
 
 PENDENTE (SPEC.md E3): a combinação quantização + `device_map`/`pipe.to("cuda")` varia
 por precisão (comentada em cada ramo abaixo) -- precisa validar na GPU real, ainda não
@@ -26,8 +26,12 @@ from server.config import Settings
 logger = logging.getLogger('render-local')
 
 # Pontos de partida -- recalibrar no benchmark (E6) com a GPU real.
-_VRAM_BF16_GB = 40.0
+# bf16 completo: transformer ~40GB + text encoder ~16GB + VAE = ~58GB + ativações.
+_VRAM_BF16_GB = 64.0
 _VRAM_FP8_GB = 18.0
+# fp8 do torchao exige compute capability 8.9+ (Ada, Hopper, Blackwell); Ampere (A40,
+# A6000, 3090) cai pra nf4 no auto.
+_FP8_MIN_CAPABILITY = (8, 9)
 # fp8 só quantiza o transformer (~20GB); o text encoder (Qwen2.5-VL 7B, ~16GB bf16) e o
 # VAE continuam em bf16 -- tudo junto na GPU dá ~37GB + ativações. Abaixo disso (ex.: RTX
 # 5090 32GB, 4090 24GB), CPU offload: cada componente sobe pra GPU só quando é usado.
@@ -40,14 +44,18 @@ def _detect_vram_gb() -> float | None:
     return torch.cuda.get_device_properties(0).total_memory / (1024**3)
 
 
-def _resolve_precision(requested: str, vram_gb: float | None) -> str:
+def _supports_fp8() -> bool:
+    return torch.cuda.is_available() and torch.cuda.get_device_capability(0) >= _FP8_MIN_CAPABILITY
+
+
+def _resolve_precision(requested: str, vram_gb: float | None, fp8_ok: bool) -> str:
     if requested != 'auto':
         return requested
     if vram_gb is None:
         raise RuntimeError('PRECISION=auto exige GPU CUDA disponível para detectar a VRAM.')
     if vram_gb >= _VRAM_BF16_GB:
         return 'bf16'
-    if vram_gb >= _VRAM_FP8_GB:
+    if vram_gb >= _VRAM_FP8_GB and fp8_ok:
         return 'fp8'
     return 'nf4'
 
@@ -72,7 +80,7 @@ class QwenImageEditPipeline:
         from diffusers import QwenImageEditPlusPipeline
 
         self.vram_gb = _detect_vram_gb()
-        self.precision = _resolve_precision(self._settings.PRECISION, self.vram_gb)
+        self.precision = _resolve_precision(self._settings.PRECISION, self.vram_gb, _supports_fp8())
         logger.info(
             'Carregando %s (VRAM detectada: %s, precisão: %s)',
             self._settings.MODEL_ID,

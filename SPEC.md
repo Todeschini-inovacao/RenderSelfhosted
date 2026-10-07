@@ -152,7 +152,7 @@ Auth opcional: se `API_KEY` definido, exigir `Authorization: Bearer <API_KEY>` (
 
 ### E3 — Pipeline real
 - [x] `server/qwen_pipeline.py`: carrega `Qwen/Qwen-Image-Edit-2511` com `diffusers` — classe confirmada no model card oficial: `QwenImageEditPlusPipeline`, disponível desde `diffusers==0.41.0` estável (não precisa da instalação via git do card)
-- [x] Detecção de VRAM e escolha de precisão (`auto`): ≥40GB bf16 completo, 18–40GB fp8 (torchao, só quantiza o `transformer`), <18GB nf4 (bitsandbytes) — limiares de partida, recalibrar no benchmark (E6)
+- [x] Detecção de VRAM e escolha de precisão (`auto`): ≥64GB bf16 completo (pesos ~58GB), 18–64GB fp8 (torchao, só quantiza o `transformer`; exige compute capability 8.9+, senão nf4), <18GB nf4 (bitsandbytes) — limiares de partida, recalibrar no benchmark (E6)
 - [x] Carregar LoRA opcional (`load_lora_weights` + `fuse_lora`, mesma env var `LORA_PATH`/`LORA_SCALE` de antes — mas ver nota: LoRA do Kontext não migra pro Qwen, isso só serve se/quando E8 treinar um novo)
 - [x] Revisão do checkpoint fixada (`MODEL_REVISION`, mitiga o risco da seção 6) — confirmada em 2026-10-06 via API do HF (`6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9`, Apache 2.0, não-gated)
 - [x] Carregar modelo no startup em background; `/health` = `loading` até pronto — já coberto pelo `main.py` da E2, sem mudança: `build_pipeline()` agora devolve `QwenImageEditPipeline` quando `MOCK=false`
