@@ -1,0 +1,21 @@
+# Deps do pipeline real (SPEC.md E3), além de requirements.txt. NÃO inclui torch --
+# a imagem Docker usa a base pytorch/pytorch, que já traz o torch casado com a versão
+# de CUDA do driver (ver docker/Dockerfile); reinstalar torch aqui por pip quebraria
+# esse casamento. Pra rodar fora do Docker (ex.: teste direto na máquina em E3), instale
+# o torch com CUDA manualmente primeiro: https://pytorch.org/get-started/locally/
+-r requirements.txt
+
+# QwenImageEditPlusPipeline confirmado disponível nesta versão estável (não precisa do
+# `pip install git+https://github.com/huggingface/diffusers` que o model card sugere).
+diffusers==0.41.0
+transformers==5.18.0
+accelerate==1.15.0
+safetensors==0.8.0
+huggingface_hub==2.1.1
+sentencepiece==0.2.2
+
+# LoRA (PEFT) e quantização (fp8 via torchao, nf4 via bitsandbytes) -- ver
+# server/qwen_pipeline.py para qual é usada em cada PRECISION.
+peft==0.21.2
+torchao==0.18.0
+bitsandbytes==0.50.2

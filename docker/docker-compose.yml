@@ -1,0 +1,51 @@
+services:
+  render-local:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      secrets:
+        - hf_token
+    image: render-local:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MOCK: "false"
+      PRECISION: auto
+      NUM_STEPS: "30"
+      GUIDANCE: "4.0"
+      MAX_SIDE: "1536"
+      RETURN_MODE: url
+      OUTPUT_DIR: /app/outputs
+      # Trocar pelo IP/host desta máquina alcançável pelo Render -- "localhost" só
+      # funciona se o Render rodar na mesma máquina.
+      PUBLIC_BASE_URL: http://localhost:8000
+    env_file:
+      # Opcional: API_KEY, LORA_PATH etc. Arquivo não versionado (.gitignore) na raiz
+      # do repo, um nível acima deste docker-compose.yml.
+      - path: ../.env
+        required: false
+    volumes:
+      - outputs:/app/outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if b'\"status\":\"ready\"' in urllib.request.urlopen('http://localhost:8000/health').read() else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+
+secrets:
+  hf_token:
+    # Token do HuggingFace (leitura), um por linha, sem quebra extra. Nunca versionar
+    # -- já coberto pelo .gitignore do repo.
+    file: ../.hf_token.txt
+
+volumes:
+  outputs:

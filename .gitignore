@@ -1,0 +1,11 @@
+.env
+.hf_token.txt
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# pesos de modelos e resultados
+models/
+outputs/
+*.safetensors

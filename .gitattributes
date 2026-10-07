@@ -1,0 +1,2 @@
+# Scripts rodam no Linux (pod/container) -- CRLF quebra o bash ("\r: command not found")
+*.sh text eol=lf
