@@ -53,7 +53,16 @@ major, minor = torch.cuda.get_device_capability(0)
 arch = f'sm_{major}{minor}'
 props = torch.cuda.get_device_properties(0)
 print(f'{props.name}: {props.total_memory / 1024**3:.1f} GB, {arch}, torch {torch.__version__}')
-assert arch in torch.cuda.get_arch_list(), f'este build do torch não tem kernels pra {arch}'
+# get_arch_list() nem sempre lista a arch exata (ex.: builds oficiais do torch não trazem
+# sm_89/Ada explicitamente, só sm_86/Ampere -- mas o kernel sm_86 roda em GPUs Ada por
+# compatibilidade binária). Em vez de exigir match exato, testa uma conta real na GPU.
+if arch not in torch.cuda.get_arch_list():
+    print(f'aviso: {arch} não está em get_arch_list() ({torch.cuda.get_arch_list()}); testando execução real')
+try:
+    x = torch.randn(256, 256, device='cuda')
+    (x @ x).sum().item()
+except RuntimeError as e:
+    raise AssertionError(f'GPU não executa kernels deste build do torch ({arch}): {e}') from e
 EOF
 
 echo "== Baixando pesos para $HF_HOME (~60 GB na primeira vez)"

@@ -31,7 +31,8 @@ def main() -> None:
         token=token,
         # .safetensors + configs/tokenizer bastam -- sem .bin/.ckpt duplicados nem
         # imagens de exemplo do repositório (ver `siblings` da API do HF pro que sobra).
-        allow_patterns=['*.safetensors', '*.json', '*.txt', 'tokenizer/**', '*.model'],
+        # *.jinja: chat_template.jinja do processor, exigido no load do QwenImageEditPlusPipeline.
+        allow_patterns=['*.safetensors', '*.json', '*.txt', 'tokenizer/**', '*.model', '*.jinja'],
     )
 
     print('Download concluído.', flush=True)
