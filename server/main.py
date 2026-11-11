@@ -75,6 +75,8 @@ class RenderRequest(BaseModel):
     # Opcional, pra testes/comparação: sobrescreve o UPSCALER do servidor nesta requisição.
     # O Render não manda -- usa o padrão do servidor.
     upscaler: str | None = None
+    # Opcional: semente fixa (mesma entrada + mesma seed = mesmo render). Sem ela, aleatório.
+    seed: int | None = None
 
 
 class RenderResponse(BaseModel):
@@ -149,7 +151,8 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
     async with state.lock:
         try:
             output = await asyncio.to_thread(
-                state.pipeline.generate, image, resolve_prompt(req.prompt, settings), req.scene_type
+                state.pipeline.generate,
+                image, resolve_prompt(req.prompt, settings), req.scene_type, req.seed,
             )
             t_gen = time.monotonic()
             model_size = output.size

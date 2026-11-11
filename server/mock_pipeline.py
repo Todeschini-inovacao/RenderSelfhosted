@@ -16,7 +16,9 @@ class MockPipeline:
     def load(self) -> None:
         pass
 
-    def generate(self, image: Image.Image, prompt: str, scene_type: str) -> Image.Image:
+    def generate(
+        self, image: Image.Image, prompt: str, scene_type: str, seed: int | None = None
+    ) -> Image.Image:
         time.sleep(self.delay_s)
 
         out = image.convert('RGBA')

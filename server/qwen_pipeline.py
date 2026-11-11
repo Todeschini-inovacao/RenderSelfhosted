@@ -280,7 +280,9 @@ class QwenImageEditPipeline:
         pipe.set_progress_bar_config(disable=True)
         self._pipe = pipe
 
-    def generate(self, image: Image.Image, prompt: str, scene_type: str) -> Image.Image:
+    def generate(
+        self, image: Image.Image, prompt: str, scene_type: str, seed: int | None = None
+    ) -> Image.Image:
         if self._pipe is None:
             raise RuntimeError('Pipeline não carregado -- chame load() primeiro.')
 
@@ -300,5 +302,7 @@ class QwenImageEditPipeline:
                 guidance_scale=1.0,
                 num_inference_steps=self._settings.NUM_STEPS,
                 num_images_per_prompt=1,
+                # seed fixa = resultado reproduzível (comparações, QC); None = aleatório.
+                generator=None if seed is None else torch.Generator('cuda').manual_seed(seed),
             )
         return output.images[0]
