@@ -32,6 +32,9 @@ _BROWSER_HEADERS = {
 }
 
 
+_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
+
+
 def _get_json(url: str, timeout: float) -> dict:
     req = urllib.request.Request(url, headers=_BROWSER_HEADERS)
     try:
@@ -114,7 +117,10 @@ def save_result(image_field: str, out_path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('image', type=Path, help='Caminho da imagem de entrada')
+    parser.add_argument(
+        'image', type=Path,
+        help='Imagem de entrada, ou uma pasta (renderiza todas as imagens dela, uma por vez)',
+    )
     parser.add_argument('--url', default=None, help='Base URL do servidor (ou env RENDER_URL)')
     parser.add_argument('--api-key', default=None, help='API key (ou env API_KEY)')
     parser.add_argument(
@@ -124,7 +130,10 @@ def main() -> None:
     )
     parser.add_argument('--scene-type', default='interior', help='sceneType enviado na requisição')
     parser.add_argument('--output-format', default='jpg', choices=['jpg', 'jpeg', 'png', 'webp'])
-    parser.add_argument('--out', type=Path, default=None, help='Onde salvar o resultado (default: <imagem>_render.<ext>)')
+    parser.add_argument(
+        '--out', type=Path, default=None,
+        help='Onde salvar (default: <imagem>_render.<ext>; com pasta: <pasta>/renders/)',
+    )
     parser.add_argument('--skip-health', action='store_true', help='Pula a checagem de /health antes de renderizar')
     args = parser.parse_args()
 
@@ -133,16 +142,37 @@ def main() -> None:
         parser.error('Informe --url ou defina a variável de ambiente RENDER_URL')
     api_key = args.api_key or os.environ.get('API_KEY')
 
-    if not args.image.is_file():
-        parser.error(f'Imagem não encontrada: {args.image}')
+    if not args.image.exists():
+        parser.error(f'Imagem ou pasta não encontrada: {args.image}')
 
     if not args.skip_health:
         check_health(base_url)
 
-    result = render(base_url, api_key, args.image, args.prompt, args.scene_type, args.output_format)
+    if args.image.is_file():
+        result = render(base_url, api_key, args.image, args.prompt, args.scene_type, args.output_format)
+        out_path = args.out or args.image.with_name(f'{args.image.stem}_render.{args.output_format}')
+        save_result(result['image'], out_path)
+        return
 
-    out_path = args.out or args.image.with_name(f'{args.image.stem}_render.{args.output_format}')
-    save_result(result['image'], out_path)
+    # Pasta: uma requisição por vez (o servidor processa uma imagem por vez e o proxy do
+    # RunPod corta requisições que esperam mais de ~100 s na fila).
+    images = sorted(p for p in args.image.iterdir() if p.suffix.lower() in _IMAGE_EXTS)
+    if not images:
+        parser.error(f'Nenhuma imagem em {args.image}')
+    out_dir = args.out or args.image / 'renders'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    falhas = []
+    for i, path in enumerate(images, 1):
+        print(f'[{i}/{len(images)}]')
+        try:
+            result = render(base_url, api_key, path, args.prompt, args.scene_type, args.output_format)
+            save_result(result['image'], out_dir / f'{path.stem}.{args.output_format}')
+        except SystemExit as exc:  # erros HTTP/conexão de uma imagem não param o lote
+            print(f'Falhou: {exc}')
+            falhas.append(path.name)
+    print(f'Pronto: {len(images) - len(falhas)} de {len(images)} em {out_dir}')
+    if falhas:
+        print('Falharam: ' + ', '.join(falhas))
 
 
 if __name__ == '__main__':

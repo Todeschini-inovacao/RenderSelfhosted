@@ -1,0 +1,78 @@
+# LoRA "todes_render" para Qwen-Image-Edit-2511, treinado com ostris/ai-toolkit
+# (arch qwen_image_edit_plus -- mesma do 2509; o zero_cond_t do 2511 vem do config do
+# transformer e é tratado pelo diffusers).
+#
+# Dataset (gerado a partir de Lora_Treino/, pares NNNN_start -> NNNN_end):
+#   target/NNNN.jpg + NNNN.txt  (render aprovado + legenda)
+#   control/NNNN.jpg            (entrada 3D, mesmo nome)
+# 121 pares de treino; 10 separados pra validação (0005 0019 0028 0044 0063 0093 0098
+# 0103 0115 0126). Legenda = DEFAULT_PROMPT do Render em produção, pra o Render não
+# precisar mudar o prompt.
+#
+# Uso (no pod, dentro de /root/ai-toolkit):
+#   /root/aitk-venv/bin/python run.py /workspace/Render-Local/scripts/lora/train_qwen_edit_2511.yaml
+---
+job: extension
+config:
+  name: "todes_render_qwen_edit_2511_v1"
+  process:
+    - type: 'diffusion_trainer'
+      training_folder: "/workspace/lora/output"
+      device: cuda:0
+      network:
+        type: "lora"
+        linear: 32
+        linear_alpha: 32
+      save:
+        dtype: float16
+        save_every: 500
+        max_step_saves_to_keep: 6
+      datasets:
+        - folder_path: "/workspace/lora/dataset/train/target"
+          control_path:
+            - "/workspace/lora/dataset/train/control"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          resolution: [ 512, 768, 1024 ]
+      train:
+        batch_size: 1
+        cache_text_embeddings: true
+        steps: 3000
+        gradient_accumulation: 1
+        timestep_type: "weighted"
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        dtype: bf16
+      model:
+        name_or_path: "/workspace/models/Qwen-Image-Edit-2511"
+        arch: "qwen_image_edit_plus"
+        # 48 GB: fp8 (qfloat8) no transformer basta -- não precisa do uint3 + adapter
+        # de recuperação do exemplo de 32 GB.
+        quantize: true
+        qtype: "qfloat8"
+        quantize_te: true
+        qtype_te: "qfloat8"
+        low_vram: false
+      sample:
+        sampler: "flowmatch"
+        sample_every: 500
+        sample_start_step: 0
+        width: 1024
+        height: 576
+        samples:
+          - prompt: "todes_render,Adds photorealism while keeping your colors and materials unchanged. Best for textured designs."
+            ctrl_img_1: "/workspace/lora/dataset/val/control/0028.jpg"
+          - prompt: "todes_render,Adds photorealism while keeping your colors and materials unchanged. Best for textured designs."
+            ctrl_img_1: "/workspace/lora/dataset/val/control/0103.jpg"
+        neg: " "
+        seed: 42
+        walk_seed: false
+        guidance_scale: 4
+        sample_steps: 20
+meta:
+  name: "todes_render_qwen_edit_2511"
+  version: '1.0'

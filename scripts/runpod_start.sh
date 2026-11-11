@@ -8,8 +8,9 @@
 set -euo pipefail
 
 WORKSPACE=${WORKSPACE:-/workspace}
-VENV=${VENV:-$WORKSPACE/venv}
-export HF_HOME=${HF_HOME:-$WORKSPACE/hf_cache}
+VENV=${VENV:-/root/venv}
+export MODEL_DIR=${MODEL_DIR:-$WORKSPACE/models/Qwen-Image-Edit-2511}
+export HF_HOME=${HF_HOME:-/root/.cache/huggingface}
 
 cd "$(dirname "$0")/.."
 

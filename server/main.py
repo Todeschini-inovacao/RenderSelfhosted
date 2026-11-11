@@ -10,12 +10,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from server import image_io
-from server.config import settings
+from server import image_io, storage
+from server.config import resolve_prompt, settings
 from server.pipeline import Pipeline, build_pipeline
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
@@ -83,6 +84,17 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail='API key inválida')
 
 
+@app.get('/ping')
+async def ping():
+    """Health check do RunPod Serverless (endpoint load balancing): 204 = inicializando,
+    200 = pronto pra receber tráfego, outro código = worker com defeito (sai do pool)."""
+    if state.status == 'ready':
+        return {'status': 'healthy'}
+    if state.status == 'loading':
+        return Response(status_code=204)
+    return JSONResponse({'status': 'error', 'error': state.error}, status_code=503)
+
+
 @app.get('/health')
 async def health():
     pipeline = state.pipeline
@@ -92,6 +104,15 @@ async def health():
         'model': pipeline.name if pipeline else None,
         'precision': pipeline.precision if pipeline else None,
         'vram_gb': pipeline.vram_gb if pipeline else None,
+        # O que está fundido no transformer (QwenImageEditPipeline.fused); o mock não tem.
+        'loras': [
+            {'name': Path(f['path']).name, 'scale': f['scale']}
+            for f in getattr(pipeline, 'fused', [])
+        ],
+        'lightning': getattr(pipeline, 'lightning', False),
+        'transformer_dir': settings.TRANSFORMER_DIR,
+        'prompt_mode': settings.PROMPT_MODE,
+        'steps': settings.NUM_STEPS,
         'busy': state.lock.locked(),
     }
 
@@ -113,7 +134,7 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
     async with state.lock:
         try:
             output = await asyncio.to_thread(
-                state.pipeline.generate, image, req.prompt, req.scene_type
+                state.pipeline.generate, image, resolve_prompt(req.prompt, settings), req.scene_type
             )
         except Exception as exc:
             logger.exception('Falha na geração')
@@ -122,6 +143,12 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
 
     if settings.RETURN_MODE == 'base64':
         result = image_io.to_data_url(output, req.output_format)
+    elif settings.RETURN_MODE in ('s3', 'azure'):
+        try:
+            result = await asyncio.to_thread(storage.upload, output, req.output_format, settings)
+        except Exception as exc:
+            logger.exception('Falha no upload pro bucket')
+            raise HTTPException(status_code=502, detail=f'Falha no upload do resultado: {exc}')
     else:
         name = image_io.save_output(output, req.output_format, settings.OUTPUT_DIR)
         result = f'{settings.PUBLIC_BASE_URL.rstrip("/")}/outputs/{name}'

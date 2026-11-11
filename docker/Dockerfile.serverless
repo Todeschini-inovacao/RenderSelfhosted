@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.7
+#
+# Imagem do worker RunPod Serverless (endpoint do tipo "load balancing"): roda o mesmo
+# servidor FastAPI (POST /render, compatível com o provider custom do Render) e responde o
+# health check do RunPod em /ping (204 carregando, 200 pronto).
+#
+# Os pesos NÃO vão na imagem (ela fica com ~10 GB em vez de ~45 GB): vêm de um repo
+# privado do HuggingFace (MODEL_REPO, montado por scripts/publish_model.py) que o "Model
+# caching" do endpoint deixa pré-baixado no disco local da máquina. Sem o cache, o
+# docker/serverless_start.sh baixa no boot (mais lento). Detalhes no README.
+#
+# CUDA 12.6 roda com driver 560+ em Ada/Hopper (RTX 6000 Ada, L40S, L40, H100) -- as
+# GPUs do endpoint. Blackwell (RTX 50xx/PRO 6000) exige a tag cuda13.0 (driver 580+):
+#   docker build --build-arg CUDA_TAG=cuda13.0 ...
+# fp8 exige compute capability 8.9+: NÃO marcar Ampere (A6000, A40, A100) no endpoint.
+#
+# Build (na raiz do repo):
+#   docker build -f docker/Dockerfile.serverless -t <usuario>/render-local-serverless:<versao> .
+ARG CUDA_TAG=cuda12.6
+FROM pytorch/pytorch:2.14.1-${CUDA_TAG}-cudnn9-runtime
+
+WORKDIR /app
+
+COPY requirements.txt requirements-gpu.txt ./
+RUN pip install --no-cache-dir -r requirements-gpu.txt
+
+COPY server ./server
+COPY scripts ./scripts
+COPY docker/serverless_start.sh ./docker/serverless_start.sh
+
+# Config de produção: Lightning 4 + LoRA já fundidos e em fp8 (vêm do MODEL_REPO), prompt
+# estrito. O worker é efêmero -- uma URL /outputs dele deixaria de existir quando ele
+# desligasse -- então o resultado vai pro Azure Blob (RETURN_MODE=azure; nas env vars do
+# endpoint: AZURE_CONTAINER e, como secret, AZURE_STORAGE_CONNECTION_STRING).
+# RETURN_MODE=s3 usa um bucket S3/R2 no lugar. Tudo sobrescrevível pelas env vars do
+# endpoint.
+ENV MOCK=false \
+    PRECISION=fp8 \
+    CPU_OFFLOAD=off \
+    NUM_STEPS=4 \
+    PROMPT_MODE=strict \
+    RETURN_MODE=azure \
+    OUTPUT_DIR=/tmp/outputs \
+    HF_HOME=/root/.cache/huggingface \
+    PORT=80 \
+    PORT_HEALTH=80
+
+EXPOSE 80
+
+CMD ["bash", "docker/serverless_start.sh"]

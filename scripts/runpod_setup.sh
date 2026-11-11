@@ -3,9 +3,16 @@
 # container, não dá pra rodar `docker build` dentro dele). Passo a passo completo no
 # README, seção "Teste na nuvem (RunPod)".
 #
-# Idempotente: pode rodar de novo a cada pod novo. Tudo que é pesado (venv, pesos do
-# modelo) fica em /workspace, que é o volume persistente do pod -- num pod reiniciado
-# com o mesmo volume, só confere e segue.
+# Idempotente: pode rodar de novo a cada pod novo ou reiniciado.
+#
+# Onde fica cada coisa:
+# - Pesos do modelo (~58 GB): $MODEL_DIR, no volume persistente (/workspace), como
+#   arquivos comuns. Num pod reiniciado com o mesmo volume, o download só confere e segue.
+# - venv: no disco do container (/root/venv), recriado a cada restart (alguns minutos).
+# O /workspace do RunPod é geesefs (em cima de S3) e NÃO guarda symlinks: depois de um
+# restart eles viram arquivos de 0 bytes. Isso quebra um venv (bin/python é symlink) e o
+# cache padrão do HuggingFace (snapshots/ são symlinks pra blobs/) -- por isso nenhum dos
+# dois fica lá.
 #
 # Uso (dentro do pod, na raiz do repo):
 #   export HF_TOKEN=hf_...     # ou configurado como secret/env var do pod no RunPod
@@ -13,8 +20,10 @@
 set -euo pipefail
 
 WORKSPACE=${WORKSPACE:-/workspace}
-VENV=${VENV:-$WORKSPACE/venv}
-export HF_HOME=${HF_HOME:-$WORKSPACE/hf_cache}
+VENV=${VENV:-/root/venv}
+export MODEL_DIR=${MODEL_DIR:-$WORKSPACE/models/Qwen-Image-Edit-2511}
+# Só metadados/xet do HF (o modelo vai pra $MODEL_DIR) -- no disco do container.
+export HF_HOME=${HF_HOME:-/root/.cache/huggingface}
 
 # Mesma versão de torch da base do docker/Dockerfile. Builds publicados pra 2.14.1: cu126
 # e cu130. cu130 exige driver 580+ e é o único que roda em Blackwell (RTX 50xx/PRO 6000,
@@ -33,8 +42,9 @@ fi
 TORCH_INDEX=https://download.pytorch.org/whl/$TORCH_CUDA
 echo "Driver $DRIVER_MAJOR -> torch $TORCH_VERSION+$TORCH_CUDA"
 
-if [ ! -x "$VENV/bin/python" ]; then
+if ! "$VENV/bin/python" -c 'import sys' 2>/dev/null; then
     echo "== Criando venv em $VENV"
+    rm -rf "$VENV"
     python3 -m venv "$VENV"
 fi
 PY="$VENV/bin/python"
@@ -65,7 +75,7 @@ except RuntimeError as e:
     raise AssertionError(f'GPU não executa kernels deste build do torch ({arch}): {e}') from e
 EOF
 
-echo "== Baixando pesos para $HF_HOME (~60 GB na primeira vez)"
+echo "== Baixando pesos para $MODEL_DIR (~58 GB na primeira vez)"
 "$PY" scripts/download_models.py
 
 echo "== Pronto. Para subir o servidor: bash scripts/runpod_start.sh"

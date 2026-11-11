@@ -9,3 +9,8 @@ __pycache__/
 models/
 outputs/
 *.safetensors
+
+# imagens de teste e dataset do LoRA (dados internos, não versionar)
+Imagens/
+Lora_Treino/
+TestesErros/
