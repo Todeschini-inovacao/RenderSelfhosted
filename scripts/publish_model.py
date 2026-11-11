@@ -71,9 +71,17 @@ def main() -> None:
     from huggingface_hub import HfApi
 
     stage(args.base, args.transformer, args.stage_dir)
+    from huggingface_hub.utils import RepositoryNotFoundError
+
     api = HfApi(token=os.environ.get('HF_TOKEN'))
-    api.create_repo(args.repo_id, private=True, exist_ok=True)
-    if not api.repo_info(args.repo_id).private:
+    # Token fine-grained restrito a um repo já criado (privado) não tem permissão de criar
+    # repo -- só cria se ainda não existir.
+    try:
+        info = api.repo_info(args.repo_id)
+    except RepositoryNotFoundError:
+        api.create_repo(args.repo_id, private=True)
+        info = api.repo_info(args.repo_id)
+    if not info.private:
         raise SystemExit(f'{args.repo_id} existe e é PÚBLICO -- não publico pesos nele.')
     # upload_large_folder: retomável e em paralelo (35 GB).
     api.upload_large_folder(repo_id=args.repo_id, repo_type='model', folder_path=args.stage_dir)
