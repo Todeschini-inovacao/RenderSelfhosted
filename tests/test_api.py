@@ -65,7 +65,9 @@ def test_render_plain_base64_returns_data_uri(client, monkeypatch):
 
 
 def test_render_resizes_large_input(client, monkeypatch):
+    # Entrada limitada a MAX_SIDE pro modelo; com OUTPUT_SIZE=model a saída fica nesse tamanho.
     monkeypatch.setattr(settings, 'MAX_SIDE', 32)
+    monkeypatch.setattr(settings, 'OUTPUT_SIZE', 'model')
     monkeypatch.setattr(settings, 'RETURN_MODE', 'base64')
     resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'outputFormat': 'png'})
     image = resp.json()['image']
@@ -177,3 +179,23 @@ def test_azure_mode_requires_connection():
 
     with pytest.raises(ValueError):
         Settings(RETURN_MODE='azure', AZURE_CONTAINER='x')
+
+
+def _decode_size(data_url: str) -> tuple[int, int]:
+    return Image.open(io.BytesIO(base64.b64decode(data_url.split(',', 1)[1]))).size
+
+
+def test_render_returns_original_size(client, monkeypatch):
+    # MAX_SIDE pequeno: o "modelo" (mock) gera menor que a original; a saída volta no
+    # tamanho da original (OUTPUT_SIZE=original), sem upscaler (none -> só Lanczos).
+    monkeypatch.setattr(settings, 'RETURN_MODE', 'base64')
+    monkeypatch.setattr(settings, 'MAX_SIDE', 32)
+    resp = client.post('/render', json={'image': _png_b64((64, 48)), 'prompt': 'x', 'outputFormat': 'png'})
+    assert resp.status_code == 200, resp.text
+    assert _decode_size(resp.json()['image']) == (64, 48)
+
+
+def test_render_invalid_upscaler(client):
+    resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'upscaler': 'magico'})
+    assert resp.status_code == 400
+    assert 'upscaler' in resp.json()['detail']

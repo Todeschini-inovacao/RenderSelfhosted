@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     # (o que deu a cor mais fiel nos testes do LoRA -- ver scripts/bench_lora.py).
     PROMPT_MODE: Literal['request', 'strict'] = 'request'
     MAX_SIDE: int = 1536
+    # original = entrega no tamanho exato da imagem de entrada (server/upscale.py);
+    # model = como o Qwen gerou (~1 MP, ex.: 1376x768).
+    OUTPUT_SIZE: Literal['original', 'model'] = 'original'
+    # Upscaler de super-resolução usado pra chegar no tamanho original com nitidez:
+    # none | realesrgan_x2 | realesrgan_x4 | swinir_x4 (ver server/upscale.py). A
+    # requisição pode sobrescrever pelo campo opcional "upscaler" (usado em testes).
+    UPSCALER: str = 'none'
+    UPSCALER_DIR: str = 'upscalers'
+    UPSCALE_TILE: int = 512
 
     # API
     API_KEY: str | None = None

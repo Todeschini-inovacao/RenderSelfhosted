@@ -35,8 +35,10 @@ _BROWSER_HEADERS = {
 _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
 
 
-def _get_json(url: str, timeout: float) -> dict:
-    req = urllib.request.Request(url, headers=_BROWSER_HEADERS)
+def _get_json(url: str, timeout: float, api_key: str | None = None) -> dict:
+    # No RunPod Serverless o gateway exige a chave do RunPod até nos GETs (/health, /ping).
+    headers = {**_BROWSER_HEADERS, **({'Authorization': f'Bearer {api_key}'} if api_key else {})}
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
@@ -59,9 +61,9 @@ def _post_json(url: str, headers: dict, body: bytes, timeout: float) -> dict:
         raise SystemExit(f'Falha ao conectar em {url}: {exc.reason}')
 
 
-def check_health(base_url: str) -> None:
+def check_health(base_url: str, api_key: str | None = None) -> None:
     print('== GET /health')
-    data = _get_json(f'{base_url}/health', timeout=15.0)
+    data = _get_json(f'{base_url}/health', timeout=15.0, api_key=api_key)
     print(json.dumps(data, indent=2, ensure_ascii=False))
     if data.get('status') != 'ready':
         raise SystemExit(f"Servidor não está pronto (status={data.get('status')!r}).")
@@ -74,18 +76,20 @@ def render(
     prompt: str,
     scene_type: str,
     output_format: str,
+    upscaler: str | None = None,
 ) -> dict:
     print(f'== POST /render ({image_path.name})')
     mime = mimetypes.guess_type(image_path.name)[0] or 'image/jpeg'
     image_b64 = base64.b64encode(image_path.read_bytes()).decode('ascii')
-    payload = json.dumps(
-        {
-            'image': f'data:{mime};base64,{image_b64}',
-            'prompt': prompt,
-            'sceneType': scene_type,
-            'outputFormat': output_format,
-        }
-    ).encode('utf-8')
+    body = {
+        'image': f'data:{mime};base64,{image_b64}',
+        'prompt': prompt,
+        'sceneType': scene_type,
+        'outputFormat': output_format,
+    }
+    if upscaler:
+        body['upscaler'] = upscaler  # sobrescreve o UPSCALER do servidor (comparações)
+    payload = json.dumps(body).encode('utf-8')
 
     headers = {'Content-Type': 'application/json'}
     if api_key:
@@ -134,6 +138,10 @@ def main() -> None:
         '--out', type=Path, default=None,
         help='Onde salvar (default: <imagem>_render.<ext>; com pasta: <pasta>/renders/)',
     )
+    parser.add_argument(
+        '--upscaler', default=None,
+        help='Sobrescreve o upscaler do servidor (none, realesrgan_x2, realesrgan_x4, swinir_x4)',
+    )
     parser.add_argument('--skip-health', action='store_true', help='Pula a checagem de /health antes de renderizar')
     args = parser.parse_args()
 
@@ -146,10 +154,10 @@ def main() -> None:
         parser.error(f'Imagem ou pasta não encontrada: {args.image}')
 
     if not args.skip_health:
-        check_health(base_url)
+        check_health(base_url, api_key)
 
     if args.image.is_file():
-        result = render(base_url, api_key, args.image, args.prompt, args.scene_type, args.output_format)
+        result = render(base_url, api_key, args.image, args.prompt, args.scene_type, args.output_format, args.upscaler)
         out_path = args.out or args.image.with_name(f'{args.image.stem}_render.{args.output_format}')
         save_result(result['image'], out_path)
         return
@@ -165,7 +173,7 @@ def main() -> None:
     for i, path in enumerate(images, 1):
         print(f'[{i}/{len(images)}]')
         try:
-            result = render(base_url, api_key, path, args.prompt, args.scene_type, args.output_format)
+            result = render(base_url, api_key, path, args.prompt, args.scene_type, args.output_format, args.upscaler)
             save_result(result['image'], out_dir / f'{path.stem}.{args.output_format}')
         except SystemExit as exc:  # erros HTTP/conexão de uma imagem não param o lote
             print(f'Falhou: {exc}')

@@ -29,6 +29,11 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 COPY requirements.txt requirements-gpu.txt ./
 RUN pip install --no-cache-dir -r requirements-gpu.txt
 
+# Pesos dos upscalers (~280 MB, SHA-256 conferido) -- antes do COPY do código, pra essa
+# camada ficar em cache entre builds.
+COPY scripts/download_upscalers.py ./scripts/
+RUN python scripts/download_upscalers.py /app/upscalers
+
 COPY server ./server
 COPY scripts ./scripts
 COPY docker/serverless_start.sh ./docker/serverless_start.sh
@@ -44,6 +49,9 @@ ENV MOCK=false \
     CPU_OFFLOAD=off \
     NUM_STEPS=4 \
     PROMPT_MODE=strict \
+    OUTPUT_SIZE=original \
+    UPSCALER=realesrgan_x2 \
+    UPSCALER_DIR=/app/upscalers \
     RETURN_MODE=azure \
     OUTPUT_DIR=/tmp/outputs \
     HF_HOME=/root/.cache/huggingface \

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from server import image_io, storage
+from server import image_io, storage, upscale
 from server.config import resolve_prompt, settings
 from server.pipeline import Pipeline, build_pipeline
 
@@ -39,6 +39,9 @@ async def _load_pipeline() -> None:
         pipeline = build_pipeline(settings)
         logger.info('Carregando pipeline %s...', pipeline.name)
         await asyncio.to_thread(pipeline.load)
+        if not settings.MOCK:
+            # Carrega o upscaler padrão já no boot (a 1ª requisição não paga o load).
+            await asyncio.to_thread(upscale.preload, settings.UPSCALER, settings)
         state.pipeline = pipeline
         state.status = 'ready'
         logger.info('Pipeline %s pronto (precisão: %s)', pipeline.name, pipeline.precision)
@@ -69,6 +72,9 @@ class RenderRequest(BaseModel):
     prompt: str
     scene_type: str = Field('interior', alias='sceneType')
     output_format: str = Field('jpg', alias='outputFormat')
+    # Opcional, pra testes/comparação: sobrescreve o UPSCALER do servidor nesta requisição.
+    # O Render não manda -- usa o padrão do servidor.
+    upscaler: str | None = None
 
 
 class RenderResponse(BaseModel):
@@ -113,6 +119,8 @@ async def health():
         'transformer_dir': settings.TRANSFORMER_DIR,
         'prompt_mode': settings.PROMPT_MODE,
         'steps': settings.NUM_STEPS,
+        'output_size': settings.OUTPUT_SIZE,
+        'upscaler': settings.UPSCALER,
         'busy': state.lock.locked(),
     }
 
@@ -124,10 +132,17 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
     if state.status != 'ready' or state.pipeline is None:
         raise HTTPException(status_code=503, detail=f'Modelo não está pronto ({state.status})')
 
+    upscaler = req.upscaler or settings.UPSCALER
+    if upscaler not in upscale.NAMES:
+        raise HTTPException(
+            status_code=400, detail=f'upscaler inválido: {upscaler!r} (opções: {sorted(upscale.NAMES)})'
+        )
+
     try:
         image = await image_io.load_image(req.image)
     except image_io.InvalidImageError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    original_size = image.size  # a saída volta neste tamanho (OUTPUT_SIZE=original)
     image = image_io.limit_size(image, settings.MAX_SIDE)
 
     t0 = time.monotonic()
@@ -136,10 +151,21 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
             output = await asyncio.to_thread(
                 state.pipeline.generate, image, resolve_prompt(req.prompt, settings), req.scene_type
             )
+            t_gen = time.monotonic()
+            model_size = output.size
+            output = await asyncio.to_thread(
+                upscale.finalize, output, original_size, upscaler, settings
+            )
         except Exception as exc:
             logger.exception('Falha na geração')
             raise HTTPException(status_code=500, detail=f'Falha na geração: {exc}')
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    t_end = time.monotonic()
+    elapsed_ms = int((t_end - t0) * 1000)
+    logger.info(
+        'Geração %d ms (%dx%d) + pós %d ms (%s -> %dx%d)',
+        int((t_gen - t0) * 1000), *model_size, int((t_end - t_gen) * 1000),
+        upscaler, output.width, output.height,
+    )
 
     if settings.RETURN_MODE == 'base64':
         result = image_io.to_data_url(output, req.output_format)
@@ -148,7 +174,9 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
             result = await asyncio.to_thread(storage.upload, output, req.output_format, settings)
         except Exception as exc:
             logger.exception('Falha no upload pro bucket')
-            raise HTTPException(status_code=502, detail=f'Falha no upload do resultado: {exc}')
+            # 500, não 502: o Cloudflare na frente do RunPod Serverless troca o corpo de
+            # respostas 502 por um "error code: 502" genérico e o detalhe se perde.
+            raise HTTPException(status_code=500, detail=f'Falha no upload do resultado: {exc}')
     else:
         name = image_io.save_output(output, req.output_format, settings.OUTPUT_DIR)
         result = f'{settings.PUBLIC_BASE_URL.rstrip("/")}/outputs/{name}'

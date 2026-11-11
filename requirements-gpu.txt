@@ -19,3 +19,6 @@ sentencepiece==0.2.2
 peft==0.21.2
 torchao==0.18.0
 bitsandbytes==0.50.2
+
+# Upscalers de super-resolução (server/upscale.py): carrega ESRGAN/SwinIR pelo .pth.
+spandrel==0.4.2
