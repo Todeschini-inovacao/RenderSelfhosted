@@ -131,3 +131,49 @@ def test_s3_mode_requires_bucket():
 
     with pytest.raises(ValueError):
         Settings(RETURN_MODE='s3', S3_BUCKET=None)
+
+
+# Connection string no formato real (conta/chave fictícias, chave base64 válida).
+_AZ_CONN = (
+    'DefaultEndpointsProtocol=https;AccountName=contateste;'
+    'AccountKey=' + base64.b64encode(b'chave-ficticia-de-teste').decode() + ';'
+    'EndpointSuffix=core.windows.net'
+)
+
+
+def _azure_settings(monkeypatch, public_url=None):
+    from azure.storage.blob import BlobClient
+
+    uploads = []
+    monkeypatch.setattr(
+        BlobClient, 'upload_blob', lambda self, data, **kw: uploads.append((self.blob_name, kw))
+    )
+    monkeypatch.setattr(settings, 'RETURN_MODE', 'azure')
+    monkeypatch.setattr(settings, 'AZURE_STORAGE_CONNECTION_STRING', _AZ_CONN)
+    monkeypatch.setattr(settings, 'AZURE_CONTAINER', 'renders')
+    monkeypatch.setattr(settings, 'AZURE_PUBLIC_BASE_URL', public_url)
+    return uploads
+
+
+def test_render_azure_returns_sas_url(client, monkeypatch):
+    uploads = _azure_settings(monkeypatch)
+    resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'outputFormat': 'png'})
+    assert resp.status_code == 200, resp.text
+    url = resp.json()['image']
+    assert url.startswith('https://contateste.blob.core.windows.net/renders/renders/')
+    assert '.png?' in url and 'sig=' in url and 'sp=r' in url
+    assert uploads[0][1]['content_settings'].content_type == 'image/png'
+
+
+def test_render_azure_public_url(client, monkeypatch):
+    uploads = _azure_settings(monkeypatch, public_url='https://cdn.exemplo.com/renders')
+    resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'outputFormat': 'jpg'})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()['image'] == f'https://cdn.exemplo.com/renders/{uploads[0][0]}'
+
+
+def test_azure_mode_requires_connection():
+    from server.config import Settings
+
+    with pytest.raises(ValueError):
+        Settings(RETURN_MODE='azure', AZURE_CONTAINER='x')

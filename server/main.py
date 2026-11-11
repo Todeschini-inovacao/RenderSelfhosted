@@ -143,7 +143,7 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
 
     if settings.RETURN_MODE == 'base64':
         result = image_io.to_data_url(output, req.output_format)
-    elif settings.RETURN_MODE == 's3':
+    elif settings.RETURN_MODE in ('s3', 'azure'):
         try:
             result = await asyncio.to_thread(storage.upload, output, req.output_format, settings)
         except Exception as exc:

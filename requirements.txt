@@ -3,5 +3,6 @@ uvicorn[standard]==0.34.0
 pillow==12.1.1
 httpx==0.28.1
 pydantic-settings==2.11.0
-# Upload do resultado pro bucket (RETURN_MODE=s3, server/storage.py).
+# Upload do resultado pro storage (RETURN_MODE=s3 ou azure, server/storage.py).
 boto3==1.44.0
+azure-storage-blob==12.31.1

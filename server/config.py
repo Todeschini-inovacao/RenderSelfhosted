@@ -48,8 +48,9 @@ class Settings(BaseSettings):
     # Saída
     OUTPUT_DIR: str = 'outputs'
     # url = salva em OUTPUT_DIR e serve em /outputs; base64 = data URI na resposta;
-    # s3 = sobe pro bucket (S3_*) e devolve a URL de lá -- o modo do Serverless.
-    RETURN_MODE: Literal['url', 'base64', 's3'] = 'url'
+    # s3 = sobe pro bucket (S3_*) e devolve a URL de lá; azure = idem no Azure Blob
+    # Storage (AZURE_*). s3/azure são os modos do Serverless (worker efêmero).
+    RETURN_MODE: Literal['url', 'base64', 's3', 'azure'] = 'url'
     PUBLIC_BASE_URL: str = 'http://localhost:8000'
 
     # Bucket S3-compatível (RETURN_MODE=s3). Cloudflare R2: S3_ENDPOINT_URL=
@@ -64,10 +65,28 @@ class Settings(BaseSettings):
     S3_PUBLIC_BASE_URL: str | None = None
     S3_PRESIGN_EXPIRES: int = 7 * 24 * 3600
 
+    # Azure Blob Storage (RETURN_MODE=azure). A connection string (portal do Azure >
+    # Storage account > Access keys) é segredo: vai como secret do endpoint, nunca no repo.
+    AZURE_STORAGE_CONNECTION_STRING: str | None = None
+    AZURE_CONTAINER: str | None = None
+    AZURE_PREFIX: str = 'renders/'
+    # URL pública na frente do container (CDN/Front Door ou o próprio
+    # https://<conta>.blob.core.windows.net/<container> se o container tiver acesso
+    # anônimo de leitura). Sem ela, devolve a URL do blob com SAS de leitura válido por
+    # AZURE_SAS_DAYS dias (exige AccountKey na connection string).
+    AZURE_PUBLIC_BASE_URL: str | None = None
+    AZURE_SAS_DAYS: int = 365
+
     @model_validator(mode='after')
-    def _check_s3(self):
+    def _check_storage(self):
         if self.RETURN_MODE == 's3' and not self.S3_BUCKET:
             raise ValueError('RETURN_MODE=s3 exige S3_BUCKET')
+        if self.RETURN_MODE == 'azure' and not (
+            self.AZURE_STORAGE_CONNECTION_STRING and self.AZURE_CONTAINER
+        ):
+            raise ValueError(
+                'RETURN_MODE=azure exige AZURE_STORAGE_CONNECTION_STRING e AZURE_CONTAINER'
+            )
         return self
 
 
