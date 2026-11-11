@@ -29,16 +29,17 @@ COPY scripts ./scripts
 COPY docker/serverless_start.sh ./docker/serverless_start.sh
 
 # Config de produção: Lightning 4 + LoRA já fundidos e em fp8 (vêm do MODEL_REPO), prompt
-# estrito. RETURN_MODE=s3 porque o worker é efêmero -- uma URL /outputs dele deixaria de
-# existir quando o worker desligasse; o resultado vai pro bucket (S3_BUCKET etc. e
-# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY nas env vars/secrets do endpoint). Tudo
-# sobrescrevível pelas env vars do endpoint.
+# estrito. O worker é efêmero -- uma URL /outputs dele deixaria de existir quando ele
+# desligasse -- então o resultado vai pro Azure Blob (RETURN_MODE=azure; nas env vars do
+# endpoint: AZURE_CONTAINER e, como secret, AZURE_STORAGE_CONNECTION_STRING).
+# RETURN_MODE=s3 usa um bucket S3/R2 no lugar. Tudo sobrescrevível pelas env vars do
+# endpoint.
 ENV MOCK=false \
     PRECISION=fp8 \
     CPU_OFFLOAD=off \
     NUM_STEPS=4 \
     PROMPT_MODE=strict \
-    RETURN_MODE=s3 \
+    RETURN_MODE=azure \
     OUTPUT_DIR=/tmp/outputs \
     HF_HOME=/root/.cache/huggingface \
     PORT=80 \
