@@ -73,18 +73,24 @@ sobe quando é usado.
 1. **Criar o pod**
    - GPU RTX 5090.
    - Template oficial PyTorch (qualquer um com Python 3.10+; o script instala o torch certo).
-   - **Volume de ~150 GB** montado em `/workspace`. Os pesos (~60 GB) e o venv ficam
-     nele. Com *Network Volume*, o download sobrevive a parar e recriar o pod.
+   - **Volume de ~100 GB** montado em `/workspace`. Os pesos (~58 GB) ficam nele, em
+     `/workspace/models/Qwen-Image-Edit-2511`, como arquivos comuns. Com *Network Volume*,
+     o download sobrevive a parar e recriar o pod.
+   - O venv fica no disco do container (`/root/venv`) e é recriado a cada restart do pod
+     (rode o `runpod_setup.sh` de novo, leva alguns minutos). Motivo: o `/workspace` do
+     RunPod é `geesefs` (em cima de S3) e **não guarda symlinks**. Depois de um restart
+     eles viram arquivos de 0 bytes, o que quebra um venv e o cache padrão do
+     HuggingFace. Por isso os pesos são baixados com `MODEL_DIR` (sem symlinks).
    - *Expose HTTP Ports*: `8000`.
    - Em *Environment Variables*, `HF_TOKEN` (de preferência como RunPod Secret) e `API_KEY`.
-2. **Levar o código para o pod.** O repo ainda não tem remote: crie o repositório
-   privado no GitHub (E1) e faça `git clone` com um token, ou envie com
-   `runpodctl send`. Não envie o `.env` nem o `.hf_token.txt`.
+2. **Levar o código para o pod.** `git clone` do repositório privado
+   (`Todeschini-inovacao/RenderSelfhosted`) com um token, ou envie com `runpodctl send`. Não envie o `.env` nem o `.hf_token.txt`.
 3. **Instalar e baixar os pesos** (no terminal do pod, na raiz do repo):
    ```bash
    bash scripts/runpod_setup.sh
    ```
-   O script confere que o torch tem kernels para a GPU (sm_120) antes de baixar os pesos.
+   O script confere que o torch roda na GPU antes de baixar os pesos. Com os pesos já no
+   volume, ele só confere o hash de cada arquivo e segue.
 4. **Subir o servidor**:
    ```bash
    bash scripts/runpod_start.sh

@@ -1,0 +1,15 @@
+# Só server/, scripts/, docker/ e requirements*.txt entram nas imagens -- o resto (imagens
+# de teste, dataset do LoRA, venvs) só deixaria o contexto de build enorme.
+Imagens/
+Lora_Treino/
+TestesErros/
+outputs/
+tests/
+.git/
+.venv/
+venv/
+**/__pycache__/
+.env
+.hf_token.txt
+*.safetensors
+*.bin

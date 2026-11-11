@@ -72,6 +72,11 @@ def _encode(img: Image.Image, output_format: str) -> tuple[bytes, str, str]:
     return buf.getvalue(), ext, mime
 
 
+def encode(img: Image.Image, output_format: str) -> tuple[bytes, str, str]:
+    """(bytes, extensão, mime) -- usado pelo upload pro bucket (server/storage.py)."""
+    return _encode(img, output_format)
+
+
 def to_data_url(img: Image.Image, output_format: str) -> str:
     data, _, mime = _encode(img, output_format)
     return f'data:{mime};base64,{base64.b64encode(data).decode("ascii")}'

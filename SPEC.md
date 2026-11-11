@@ -3,8 +3,8 @@
 > Contexto, pesquisa de modelos e licenças: ver [README.md](README.md).
 > Este documento é o **plano de execução**: etapas em ordem, com tarefas e critério de aceite.
 
-- **Status:** E1, E2, E3 e E4 concluídas no código (pipeline real + Docker escritos, sem GPU pra testar ainda); falta E0 (a máquina física) pra validar e seguir pra E5/E6
-- **Última atualização:** 2026-10-07
+- **Status:** E1 e E2 concluídas. E3 **rodando em GPU real** no RunPod (RTX 6000 Ada 48 GB, fp8), mas a **120 s por imagem**, o dobro da meta — falta otimizar e testar com um lote real. E4 (Docker) escrita, não testada. Falta E0 (máquina física)
+- **Última atualização:** 2026-11-06
 
 ---
 
@@ -59,12 +59,16 @@ Render-Local/
 ├── server/
 │   ├── main.py            # FastAPI: /render, /health
 │   ├── config.py          # env vars
-│   ├── pipeline.py        # carga do modelo, escolha por VRAM, geração
+│   ├── pipeline.py        # interface comum + build_pipeline() (mock ou real)
+│   ├── qwen_pipeline.py   # Qwen-Image-Edit: carga, escolha de precisão por VRAM, geração
 │   ├── mock_pipeline.py   # devolve a própria imagem (dev sem GPU)
 │   └── image_io.py        # base64/URL <-> PIL
 ├── scripts/
 │   ├── download_models.py # baixa pesos (usado no build)
-│   └── benchmark.py       # local × fal, tempo + Delta E
+│   ├── runpod_setup.sh    # prepara um pod do RunPod (sem Docker)
+│   ├── runpod_start.sh    # sobe o servidor no pod
+│   ├── test_render.py     # cliente de teste: /health + /render
+│   └── benchmark.py       # local × fal, tempo + Delta E (E6, ainda não existe)
 ├── samples/               # imagens de teste (+ máscaras)
 └── outputs/               # resultados do benchmark
 ```
@@ -134,8 +138,8 @@ Auth opcional: se `API_KEY` definido, exigir `Authorization: Bearer <API_KEY>` (
 ### E1 — Esqueleto do repositório
 - [x] `git init`, `.gitignore`, `.env.example`
 - [x] Estrutura inicial (`server/`, `tests/`); `docker/`, `scripts/`, `samples/` entram nas próximas etapas
-- [ ] Primeiro commit
-- [ ] Repositório privado no GitHub (org Todeschini-inovacao?)
+- [x] Primeiro commit (2026-10-07)
+- [x] Repositório privado no GitHub: `Todeschini-inovacao/RenderSelfhosted`
 
 **Aceite:** repo versionado com a estrutura vazia.
 
@@ -158,7 +162,15 @@ Auth opcional: se `API_KEY` definido, exigir `Authorization: Bearer <API_KEY>` (
 - [x] Carregar modelo no startup em background; `/health` = `loading` até pronto — já coberto pelo `main.py` da E2, sem mudança: `build_pipeline()` agora devolve `QwenImageEditPipeline` quando `MOCK=false`
 - [x] Ajustes pra RTX 5090 32GB (2026-10-07): base Docker e torch com CUDA 13.0 (Blackwell/sm_120 exige 12.8+); ramo fp8 carrega na CPU e usa `enable_model_cpu_offload()` abaixo de 40GB (`CPU_OFFLOAD=auto`), porque transformer fp8 + text encoder bf16 (~37GB) não cabem em 32GB
 - [x] Scripts pra validar num pod do RunPod sem Docker: `scripts/runpod_setup.sh` e `scripts/runpod_start.sh` (README, "Teste na nuvem")
-- [ ] **PENDENTE (precisa de GPU — física ou RunPod):** rodar direto na máquina (sem Docker) com algumas imagens de `samples/` — nada disso foi testado em hardware real ainda. Em especial, confirmar: (a) a combinação quantização + `device_map`/`.to("cuda")` nos ramos fp8/nf4 (ver comentários em `qwen_pipeline.py`); (b) se a imagem `-runtime` (sem nvcc) basta pro torchao/Triton em fp8, ou se precisa trocar pra `-devel`.
+- [x] Ajustes do setup no RunPod (2026-10-07 a 2026-10-15): `runpod_setup.sh` escolhe torch cu126 ou cu130 pela versão do driver; checagem da GPU testa uma conta real em vez de exigir a arch exata em `get_arch_list()` (builds oficiais não listam sm_89/Ada); `download_models.py` passa a baixar `*.jinja` (`chat_template.jinja`, exigido no load do `QwenImageEditPlusPipeline`); `huggingface_hub` fixado em 1.33.0
+- [x] `scripts/test_render.py`: cliente só com a stdlib que chama `/health` e `/render` (local ou no proxy do RunPod, com User-Agent de navegador por causa do Cloudflare)
+- [x] Volume do RunPod (2026-11-06): o `/workspace` é `geesefs` (em cima de S3) e não guarda symlinks — depois de um restart do pod viram arquivos de 0 bytes, o que quebrou o venv e o cache do HF. Correção: venv no disco do container (`/root/venv`) e pesos baixados com `MODEL_DIR` (arquivos comuns, `local_dir`) em `/workspace/models/Qwen-Image-Edit-2511`; o servidor carrega de `MODEL_DIR` quando definido
+- [x] **Pipeline real rodando no RunPod (2026-11-06)** — RTX 6000 Ada 48 GB (sm_89), driver 595, torch 2.14.1+cu130, `PRECISION=auto` → **fp8 sem offload**, 36,8 GB de VRAM em uso. Responde em `/render` pelo proxy público. Isso fecha a dúvida (a) acima pro ramo fp8 em 48 GB; nf4 e fp8+offload continuam sem teste em hardware
+  - Carga: ~14 min (10 min lendo 54 GB do volume + quantizando na CPU; ~4 min indo pra GPU)
+  - **Render 1376×768, 30 steps, `true_cfg_scale` 4.0: 120 s com o modelo aquecido** (128 s no primeiro), GPU a 100% no teto de 300 W — acima da meta de ≤ 60 s e do limite de ~100 s do proxy do RunPod (o primeiro teste pelo proxy voltou HTTP 524, embora o render tenha terminado no servidor)
+  - Qualidade (1 imagem, sem a entrada original pra comparar): móveis e acabamentos preservados, mas o modelo trocou a porta por um painel de vidro fosco — mesmo tipo de alucinação de geometria visto em 2026-10-15 (janela inventada). Reforça a necessidade da E7
+- [ ] Reduzir o tempo por imagem pra ≤ 60 s: testar menos steps (ex.: 20), fp8 com ativação dinâmica (`Float8DynamicActivationFloat8WeightConfig`, usa os tensor cores fp8 da Ada em vez de só desquantizar o peso) e LoRA de destilação de poucos steps (Lightning), conferindo a licença
+- [ ] Rodar com um lote real de `samples/` (entradas do Render) e comparar com o fal Em especial, confirmar: (a) a combinação quantização + `device_map`/`.to("cuda")` nos ramos fp8/nf4 (ver comentários em `qwen_pipeline.py`); (b) se a imagem `-runtime` (sem nvcc) basta pro torchao/Triton em fp8, ou se precisa trocar pra `-devel`.
 
 **Aceite:** gera imagem coerente em ≤ 60 s na GPU de teste, sem estourar VRAM.
 

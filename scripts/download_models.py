@@ -10,6 +10,11 @@ licença Apache 2.0, repositório não-gated).
 
 Uso: HF_TOKEN=<token com acesso de leitura> python scripts/download_models.py
 No Dockerfile, o token entra via `--mount=type=secret` (nunca fica gravado na imagem).
+
+Com MODEL_DIR definido, baixa como arquivos comuns nessa pasta em vez do cache do HF.
+O cache usa symlinks (snapshots/ -> blobs/), e o volume /workspace do RunPod (geesefs,
+em cima de S3) não guarda symlinks: depois de um restart do pod eles viram arquivos de
+0 bytes e o modelo deixa de carregar. Ver scripts/runpod_setup.sh.
 """
 
 import os
@@ -17,18 +22,21 @@ import sys
 
 MODEL_ID = os.environ.get('MODEL_ID', 'Qwen/Qwen-Image-Edit-2511')
 MODEL_REVISION = os.environ.get('MODEL_REVISION', '6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9')
+MODEL_DIR = os.environ.get('MODEL_DIR') or None
 
 
 def main() -> None:
     from huggingface_hub import snapshot_download
 
     token = os.environ.get('HF_TOKEN')
-    print(f'Baixando {MODEL_ID}@{MODEL_REVISION} para o cache do HuggingFace...', flush=True)
+    destino = MODEL_DIR or 'o cache do HuggingFace'
+    print(f'Baixando {MODEL_ID}@{MODEL_REVISION} para {destino}...', flush=True)
 
     snapshot_download(
         repo_id=MODEL_ID,
         revision=MODEL_REVISION,
         token=token,
+        local_dir=MODEL_DIR,
         # .safetensors + configs/tokenizer bastam -- sem .bin/.ckpt duplicados nem
         # imagens de exemplo do repositório (ver `siblings` da API do HF pro que sobra).
         # *.jinja: chat_template.jinja do processor, exigido no load do QwenImageEditPlusPipeline.
