@@ -15,6 +15,10 @@ FROM pytorch/pytorch:2.14.1-cuda13.0-cudnn9-runtime
 
 WORKDIR /app
 
+# A base 2.14.1 usa o Python do sistema (Ubuntu), que bloqueia pip fora de venv (PEP 668,
+# "externally-managed-environment"). Num container isso é seguro de liberar.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
 COPY requirements.txt requirements-gpu.txt ./
 RUN pip install --no-cache-dir -r requirements-gpu.txt
 
