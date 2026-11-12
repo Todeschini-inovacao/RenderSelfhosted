@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -81,8 +81,18 @@ class RenderRequest(BaseModel):
 
 class RenderResponse(BaseModel):
     image: str
-    elapsed_ms: int
+    elapsed_ms: int  # total no servidor (fila + geração + pós + upload)
     model: str
+    # Detalhamento do elapsed_ms, pra investigar lentidão:
+    queue_ms: int  # esperando a GPU (outras requisições na frente, neste worker)
+    generate_ms: int  # geração no Qwen
+    post_ms: int  # upscale + redimensionamento pro tamanho original
+    upload_ms: int  # salvar/enviar o resultado (Azure/S3/disco/base64)
+
+
+# Status pra requisição cujo cliente desistiu antes de chegar a vez dela na GPU
+# (convenção do nginx, "client closed request"). Ninguém lê essa resposta.
+CLIENT_CLOSED_REQUEST = 499
 
 
 def _check_auth(authorization: str | None) -> None:
@@ -128,7 +138,9 @@ async def health():
 
 
 @app.post('/render', response_model=RenderResponse)
-async def render(req: RenderRequest, authorization: str | None = Header(default=None)):
+async def render(
+    req: RenderRequest, request: Request, authorization: str | None = Header(default=None)
+):
     _check_auth(authorization)
 
     if state.status != 'ready' or state.pipeline is None:
@@ -149,6 +161,15 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
 
     t0 = time.monotonic()
     async with state.lock:
+        t_start = time.monotonic()
+        # Se o cliente desistiu enquanto esperava na fila (ex.: timeout do Render), não
+        # gasta GPU com um render que ninguém vai receber -- libera a vez pro próximo.
+        if await request.is_disconnected():
+            logger.warning(
+                'Cliente desistiu após %d ms na fila; render descartado',
+                int((t_start - t0) * 1000),
+            )
+            return Response(status_code=CLIENT_CLOSED_REQUEST)
         try:
             output = await asyncio.to_thread(
                 state.pipeline.generate,
@@ -162,12 +183,13 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
         except Exception as exc:
             logger.exception('Falha na geração')
             raise HTTPException(status_code=500, detail=f'Falha na geração: {exc}')
-    t_end = time.monotonic()
-    elapsed_ms = int((t_end - t0) * 1000)
+    t_post = time.monotonic()
+    queue_ms = int((t_start - t0) * 1000)
+    generate_ms = int((t_gen - t_start) * 1000)
+    post_ms = int((t_post - t_gen) * 1000)
     logger.info(
-        'Geração %d ms (%dx%d) + pós %d ms (%s -> %dx%d)',
-        int((t_gen - t0) * 1000), *model_size, int((t_end - t_gen) * 1000),
-        upscaler, output.width, output.height,
+        'Fila %d ms + geração %d ms (%dx%d) + pós %d ms (%s -> %dx%d)',
+        queue_ms, generate_ms, *model_size, post_ms, upscaler, output.width, output.height,
     )
 
     if settings.RETURN_MODE == 'base64':
@@ -183,8 +205,16 @@ async def render(req: RenderRequest, authorization: str | None = Header(default=
     else:
         name = image_io.save_output(output, req.output_format, settings.OUTPUT_DIR)
         result = f'{settings.PUBLIC_BASE_URL.rstrip("/")}/outputs/{name}'
+    t_end = time.monotonic()
+    upload_ms = int((t_end - t_post) * 1000)
+    elapsed_ms = int((t_end - t0) * 1000)
 
     logger.info(
-        'Render ok: %s %dx%d em %d ms', req.scene_type, output.width, output.height, elapsed_ms
+        'Render ok: %s %dx%d em %d ms (fila %d, geração %d, pós %d, upload %d)',
+        req.scene_type, output.width, output.height, elapsed_ms,
+        queue_ms, generate_ms, post_ms, upload_ms,
     )
-    return RenderResponse(image=result, elapsed_ms=elapsed_ms, model=state.pipeline.name)
+    return RenderResponse(
+        image=result, elapsed_ms=elapsed_ms, model=state.pipeline.name,
+        queue_ms=queue_ms, generate_ms=generate_ms, post_ms=post_ms, upload_ms=upload_ms,
+    )

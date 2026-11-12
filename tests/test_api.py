@@ -199,3 +199,30 @@ def test_render_invalid_upscaler(client):
     resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'upscaler': 'magico'})
     assert resp.status_code == 400
     assert 'upscaler' in resp.json()['detail']
+
+
+def test_render_reports_timing_breakdown(client):
+    resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x'})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    for key in ('queue_ms', 'generate_ms', 'post_ms', 'upload_ms'):
+        assert isinstance(body[key], int) and body[key] >= 0
+    parts = body['queue_ms'] + body['generate_ms'] + body['post_ms'] + body['upload_ms']
+    assert parts <= body['elapsed_ms'] + 4  # arredondamento de cada parte
+
+
+def test_render_skipped_when_client_disconnected(client, monkeypatch):
+    # Cliente (ex.: Render por timeout) desistiu enquanto esperava a GPU: não renderiza.
+    from starlette.requests import Request
+
+    from server.main import state
+
+    async def _gone(self):
+        return True
+
+    calls = []
+    monkeypatch.setattr(Request, 'is_disconnected', _gone)
+    monkeypatch.setattr(state.pipeline, 'generate', lambda *a, **k: calls.append(a))
+    resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x'})
+    assert resp.status_code == 499
+    assert calls == []
