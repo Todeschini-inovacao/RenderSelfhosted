@@ -38,8 +38,10 @@ class Settings(BaseSettings):
     # do fused_info.json da pasta. Corta o tempo de subida.
     TRANSFORMER_DIR: str | None = None
     # request = usa o prompt que vem na requisição; strict = ignora e usa STRICT_PROMPT
-    # (o que deu a cor mais fiel nos testes do LoRA -- ver scripts/bench_lora.py).
-    PROMPT_MODE: Literal['request', 'strict'] = 'request'
+    # (o que deu a cor mais fiel nos testes do LoRA -- ver scripts/bench_lora.py);
+    # strict_plus = STRICT_PROMPT + a descrição da cena (campo sceneDescription, gerada pela
+    # análise de imagem do Render). Sem descrição na requisição, fica igual ao strict.
+    PROMPT_MODE: Literal['request', 'strict', 'strict_plus'] = 'request'
     MAX_SIDE: int = 1536
     # original = entrega no tamanho exato da imagem de entrada (server/upscale.py);
     # model = como o Qwen gerou (~1 MP, ex.: 1376x768).
@@ -108,8 +110,31 @@ STRICT_PROMPT = (
 )
 
 
-def resolve_prompt(request_prompt: str, settings: 'Settings') -> str:
-    return STRICT_PROMPT if settings.PROMPT_MODE == 'strict' else request_prompt
+# Antes da descrição da cena (strict_plus/request). A descrição vem da análise de imagem do
+# Render (Gemini) e lista móveis, puxadores, curvas, materiais etc. da imagem de entrada.
+SCENE_DESCRIPTION_PREFIX = (
+    'Reproduce every element below exactly as it is in the input image: keep the exact '
+    'shape, curves, proportions, handles, materials and colors of each piece. '
+    'Scene description: '
+)
+
+
+# Teto da descrição (o encoder do Qwen não corta texto longo, só fica mais lento). Uma cena
+# grande analisada pelo Render fica na casa de 10-20k caracteres.
+SCENE_DESCRIPTION_MAX_CHARS = 30000
+
+
+def resolve_prompt(
+    request_prompt: str, settings: 'Settings', scene_description: str | None = None
+) -> str:
+    """Prompt que vai pro modelo, conforme PROMPT_MODE."""
+    description = (scene_description or '').strip()[:SCENE_DESCRIPTION_MAX_CHARS]
+    if settings.PROMPT_MODE == 'strict':
+        return STRICT_PROMPT
+    base = STRICT_PROMPT if settings.PROMPT_MODE == 'strict_plus' else request_prompt
+    if not description:
+        return base
+    return f'{base}\n\n{SCENE_DESCRIPTION_PREFIX}{description}'
 
 
 settings = Settings()

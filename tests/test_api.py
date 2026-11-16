@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from server.config import settings
+from server.config import SCENE_DESCRIPTION_PREFIX, STRICT_PROMPT, settings
 from server.main import app
 
 
@@ -226,3 +226,48 @@ def test_render_skipped_when_client_disconnected(client, monkeypatch):
     resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x'})
     assert resp.status_code == 499
     assert calls == []
+
+
+def _capture_prompt(monkeypatch):
+    """Troca o generate do mock por um que guarda o prompt e devolve a própria imagem."""
+    from server.main import state
+
+    prompts = []
+
+    def generate(image, prompt, scene_type, seed=None):
+        prompts.append(prompt)
+        return image
+
+    monkeypatch.setattr(state.pipeline, 'generate', generate)
+    return prompts
+
+
+@pytest.mark.parametrize('mode, description, expected', [
+    ('strict', 'sofá curvo', STRICT_PROMPT),
+    ('strict_plus', None, STRICT_PROMPT),
+    ('strict_plus', 'sofá curvo', f'{STRICT_PROMPT}\n\n{SCENE_DESCRIPTION_PREFIX}sofá curvo'),
+    ('request', None, 'prompt do Render'),
+    ('request', 'sofá curvo', f'prompt do Render\n\n{SCENE_DESCRIPTION_PREFIX}sofá curvo'),
+])
+def test_render_prompt_modes(client, monkeypatch, mode, description, expected):
+    monkeypatch.setattr(settings, 'PROMPT_MODE', mode)
+    prompts = _capture_prompt(monkeypatch)
+    body = {'image': _png_b64(), 'prompt': 'prompt do Render'}
+    if description is not None:
+        body['sceneDescription'] = description
+    resp = client.post('/render', json=body)
+    assert resp.status_code == 200, resp.text
+    assert prompts == [expected]
+
+
+def test_render_long_scene_description_is_accepted_and_capped(client, monkeypatch):
+    # Análise de cena grande (> 8k caracteres) não pode virar 422 (cairia no fallback do fal)
+    from server.config import SCENE_DESCRIPTION_MAX_CHARS
+
+    monkeypatch.setattr(settings, 'PROMPT_MODE', 'strict_plus')
+    prompts = _capture_prompt(monkeypatch)
+    body = {'image': _png_b64(), 'prompt': 'x', 'sceneDescription': 'a' * (SCENE_DESCRIPTION_MAX_CHARS + 5000)}
+    resp = client.post('/render', json=body)
+    assert resp.status_code == 200, resp.text
+    assert prompts[0].endswith('a' * SCENE_DESCRIPTION_MAX_CHARS)
+    assert len(prompts[0]) == len(f'{STRICT_PROMPT}\n\n{SCENE_DESCRIPTION_PREFIX}') + SCENE_DESCRIPTION_MAX_CHARS

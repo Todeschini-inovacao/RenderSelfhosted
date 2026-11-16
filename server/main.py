@@ -77,6 +77,12 @@ class RenderRequest(BaseModel):
     upscaler: str | None = None
     # Opcional: semente fixa (mesma entrada + mesma seed = mesmo render). Sem ela, aleatório.
     seed: int | None = None
+    # Opcional: descrição da cena (análise de imagem do Render). Só é usada com
+    # PROMPT_MODE=strict_plus (somada ao STRICT_PROMPT) ou request (somada ao prompt).
+    # Sem max_length de propósito: a análise vem em blocos por móvel e passa fácil de 8k
+    # caracteres; recusar (422) mandaria tudo pro fallback no fal. O excesso é cortado em
+    # resolve_prompt (SCENE_DESCRIPTION_MAX_CHARS).
+    scene_description: str | None = Field(None, alias='sceneDescription')
 
 
 class RenderResponse(BaseModel):
@@ -173,7 +179,10 @@ async def render(
         try:
             output = await asyncio.to_thread(
                 state.pipeline.generate,
-                image, resolve_prompt(req.prompt, settings), req.scene_type, req.seed,
+                image,
+                resolve_prompt(req.prompt, settings, req.scene_description),
+                req.scene_type,
+                req.seed,
             )
             t_gen = time.monotonic()
             model_size = output.size
