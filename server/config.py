@@ -125,13 +125,17 @@ SCENE_DESCRIPTION_MAX_CHARS = 30000
 
 
 def resolve_prompt(
-    request_prompt: str, settings: 'Settings', scene_description: str | None = None
+    request_prompt: str,
+    settings: 'Settings',
+    scene_description: str | None = None,
+    prompt_mode: str | None = None,
 ) -> str:
-    """Prompt que vai pro modelo, conforme PROMPT_MODE."""
+    """Prompt que vai pro modelo, conforme PROMPT_MODE (ou prompt_mode, se a requisição mandar)."""
+    mode = prompt_mode or settings.PROMPT_MODE
     description = (scene_description or '').strip()[:SCENE_DESCRIPTION_MAX_CHARS]
-    if settings.PROMPT_MODE == 'strict':
+    if mode == 'strict':
         return STRICT_PROMPT
-    base = STRICT_PROMPT if settings.PROMPT_MODE == 'strict_plus' else request_prompt
+    base = STRICT_PROMPT if mode == 'strict_plus' else request_prompt
     if not description:
         return base
     return f'{base}\n\n{SCENE_DESCRIPTION_PREFIX}{description}'

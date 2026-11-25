@@ -83,6 +83,9 @@ class RenderRequest(BaseModel):
     # caracteres; recusar (422) mandaria tudo pro fallback no fal. O excesso é cortado em
     # resolve_prompt (SCENE_DESCRIPTION_MAX_CHARS).
     scene_description: str | None = Field(None, alias='sceneDescription')
+    # Opcional: sobrescreve o PROMPT_MODE do servidor nesta requisição (ex.: "request" pra
+    # usar o prompt enviado mesmo com o endpoint em strict). Sem ele, vale o PROMPT_MODE.
+    prompt_mode: Literal['request', 'strict', 'strict_plus'] | None = Field(None, alias='promptMode')
 
 
 class RenderResponse(BaseModel):
@@ -180,7 +183,7 @@ async def render(
             output = await asyncio.to_thread(
                 state.pipeline.generate,
                 image,
-                resolve_prompt(req.prompt, settings, req.scene_description),
+                resolve_prompt(req.prompt, settings, req.scene_description, req.prompt_mode),
                 req.scene_type,
                 req.seed,
             )

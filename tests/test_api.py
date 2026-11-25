@@ -271,3 +271,24 @@ def test_render_long_scene_description_is_accepted_and_capped(client, monkeypatc
     assert resp.status_code == 200, resp.text
     assert prompts[0].endswith('a' * SCENE_DESCRIPTION_MAX_CHARS)
     assert len(prompts[0]) == len(f'{STRICT_PROMPT}\n\n{SCENE_DESCRIPTION_PREFIX}') + SCENE_DESCRIPTION_MAX_CHARS
+
+
+@pytest.mark.parametrize('server_mode, req_mode, expected', [
+    ('strict', 'request', 'prompt do cliente'),
+    ('request', 'strict', STRICT_PROMPT),
+    ('strict', None, STRICT_PROMPT),
+])
+def test_render_prompt_mode_override(client, monkeypatch, server_mode, req_mode, expected):
+    monkeypatch.setattr(settings, 'PROMPT_MODE', server_mode)
+    prompts = _capture_prompt(monkeypatch)
+    body = {'image': _png_b64(), 'prompt': 'prompt do cliente'}
+    if req_mode is not None:
+        body['promptMode'] = req_mode
+    resp = client.post('/render', json=body)
+    assert resp.status_code == 200, resp.text
+    assert prompts == [expected]
+
+
+def test_render_invalid_prompt_mode(client):
+    resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'promptMode': 'livre'})
+    assert resp.status_code == 422
