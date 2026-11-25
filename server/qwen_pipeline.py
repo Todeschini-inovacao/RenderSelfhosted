@@ -281,10 +281,21 @@ class QwenImageEditPipeline:
         self._pipe = pipe
 
     def generate(
-        self, image: Image.Image, prompt: str, scene_type: str, seed: int | None = None
+        self,
+        image: Image.Image,
+        prompt: str,
+        scene_type: str,
+        seed: int | None = None,
+        negative_prompt: str = ' ',
     ) -> Image.Image:
         if self._pipe is None:
             raise RuntimeError('Pipeline não carregado -- chame load() primeiro.')
+
+        negative_prompt = negative_prompt.strip() or ' '
+        # Lightning roda com true_cfg_scale=1: o pipeline pula o passo negativo, então o
+        # prompt negativo não entra no cálculo. Avisa pra ninguém achar que ele está valendo.
+        if self.lightning and negative_prompt != ' ':
+            logger.warning('Prompt negativo ignorado: Lightning ativo (sem CFG)')
 
         # scene_type não é usado pelo Qwen-Image-Edit (o fal.ai também só usava isso pra
         # registro, não mandava pro modelo) -- mantido só pra bater com o Protocol/contrato
@@ -297,7 +308,7 @@ class QwenImageEditPipeline:
             output = self._pipe(
                 image=[image],
                 prompt=prompt,
-                negative_prompt=' ',
+                negative_prompt=negative_prompt,
                 true_cfg_scale=1.0 if self.lightning else self._settings.GUIDANCE,
                 guidance_scale=1.0,
                 num_inference_steps=self._settings.NUM_STEPS,

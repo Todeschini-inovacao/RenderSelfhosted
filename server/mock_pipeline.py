@@ -17,7 +17,12 @@ class MockPipeline:
         pass
 
     def generate(
-        self, image: Image.Image, prompt: str, scene_type: str, seed: int | None = None
+        self,
+        image: Image.Image,
+        prompt: str,
+        scene_type: str,
+        seed: int | None = None,
+        negative_prompt: str = ' ',
     ) -> Image.Image:
         time.sleep(self.delay_s)
 

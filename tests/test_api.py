@@ -234,7 +234,7 @@ def _capture_prompt(monkeypatch):
 
     prompts = []
 
-    def generate(image, prompt, scene_type, seed=None):
+    def generate(image, prompt, scene_type, seed=None, negative_prompt=' '):
         prompts.append(prompt)
         return image
 
@@ -292,3 +292,35 @@ def test_render_prompt_mode_override(client, monkeypatch, server_mode, req_mode,
 def test_render_invalid_prompt_mode(client):
     resp = client.post('/render', json={'image': _png_b64(), 'prompt': 'x', 'promptMode': 'livre'})
     assert resp.status_code == 422
+
+
+def _capture_negative(monkeypatch):
+    """Troca o generate do mock por um que guarda o prompt negativo."""
+    from server.main import state
+
+    negatives = []
+
+    def generate(image, prompt, scene_type, seed=None, negative_prompt=' '):
+        negatives.append(negative_prompt)
+        return image
+
+    monkeypatch.setattr(state.pipeline, 'generate', generate)
+    return negatives
+
+
+@pytest.mark.parametrize('server_default, req_negative, expected', [
+    ('', None, ' '),
+    ('low poly', None, 'low poly'),
+    ('low poly', 'plastic, blurry', 'plastic, blurry'),
+    ('low poly', '', ' '),
+    ('', '  cgi  ', 'cgi'),
+])
+def test_render_negative_prompt(client, monkeypatch, server_default, req_negative, expected):
+    monkeypatch.setattr(settings, 'NEGATIVE_PROMPT', server_default)
+    negatives = _capture_negative(monkeypatch)
+    body = {'image': _png_b64(), 'prompt': 'x'}
+    if req_negative is not None:
+        body['negativePrompt'] = req_negative
+    resp = client.post('/render', json=body)
+    assert resp.status_code == 200, resp.text
+    assert negatives == [expected]

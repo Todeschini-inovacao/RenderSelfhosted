@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from server import image_io, storage, upscale
-from server.config import resolve_prompt, settings
+from server.config import resolve_negative_prompt, resolve_prompt, settings
 from server.pipeline import Pipeline, build_pipeline
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
@@ -86,6 +86,9 @@ class RenderRequest(BaseModel):
     # Opcional: sobrescreve o PROMPT_MODE do servidor nesta requisição (ex.: "request" pra
     # usar o prompt enviado mesmo com o endpoint em strict). Sem ele, vale o PROMPT_MODE.
     prompt_mode: Literal['request', 'strict', 'strict_plus'] | None = Field(None, alias='promptMode')
+    # Opcional: prompt negativo desta requisição (sobrescreve o NEGATIVE_PROMPT do servidor;
+    # "" = neutro). Ignorado com Lightning, que roda sem CFG.
+    negative_prompt: str | None = Field(None, alias='negativePrompt')
 
 
 class RenderResponse(BaseModel):
@@ -186,6 +189,7 @@ async def render(
                 resolve_prompt(req.prompt, settings, req.scene_description, req.prompt_mode),
                 req.scene_type,
                 req.seed,
+                resolve_negative_prompt(req.negative_prompt, settings),
             )
             t_gen = time.monotonic()
             model_size = output.size

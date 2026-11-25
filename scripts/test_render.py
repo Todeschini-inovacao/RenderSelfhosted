@@ -78,6 +78,8 @@ def render(
     output_format: str,
     upscaler: str | None = None,
     seed: int | None = None,
+    negative_prompt: str | None = None,
+    prompt_mode: str | None = None,
 ) -> dict:
     print(f'== POST /render ({image_path.name})')
     mime = mimetypes.guess_type(image_path.name)[0] or 'image/jpeg'
@@ -92,6 +94,10 @@ def render(
         body['upscaler'] = upscaler  # sobrescreve o UPSCALER do servidor (comparações)
     if seed is not None:
         body['seed'] = seed  # mesma seed = mesmo render (comparações justas)
+    if negative_prompt is not None:
+        body['negativePrompt'] = negative_prompt  # ignorado com Lightning (sem CFG)
+    if prompt_mode:
+        body['promptMode'] = prompt_mode  # request = usa o --prompt mesmo com servidor em strict
     payload = json.dumps(body).encode('utf-8')
 
     headers = {'Content-Type': 'application/json'}
@@ -146,6 +152,14 @@ def main() -> None:
         help='Sobrescreve o upscaler do servidor (none, realesrgan_x2, realesrgan_x4, swinir_x4)',
     )
     parser.add_argument('--seed', type=int, default=None, help='Semente fixa (render reproduzível)')
+    parser.add_argument(
+        '--negative-prompt', default=None,
+        help='Prompt negativo (sobrescreve o NEGATIVE_PROMPT do servidor; sem efeito com Lightning)',
+    )
+    parser.add_argument(
+        '--prompt-mode', default=None, choices=['request', 'strict', 'strict_plus'],
+        help='Sobrescreve o PROMPT_MODE do servidor (request = usa o --prompt)',
+    )
     parser.add_argument('--skip-health', action='store_true', help='Pula a checagem de /health antes de renderizar')
     args = parser.parse_args()
 
@@ -161,7 +175,10 @@ def main() -> None:
         check_health(base_url, api_key)
 
     if args.image.is_file():
-        result = render(base_url, api_key, args.image, args.prompt, args.scene_type, args.output_format, args.upscaler, args.seed)
+        result = render(
+            base_url, api_key, args.image, args.prompt, args.scene_type, args.output_format,
+            args.upscaler, args.seed, args.negative_prompt, args.prompt_mode,
+        )
         out_path = args.out or args.image.with_name(f'{args.image.stem}_render.{args.output_format}')
         save_result(result['image'], out_path)
         return
@@ -177,7 +194,10 @@ def main() -> None:
     for i, path in enumerate(images, 1):
         print(f'[{i}/{len(images)}]')
         try:
-            result = render(base_url, api_key, path, args.prompt, args.scene_type, args.output_format, args.upscaler, args.seed)
+            result = render(
+                base_url, api_key, path, args.prompt, args.scene_type, args.output_format,
+                args.upscaler, args.seed, args.negative_prompt, args.prompt_mode,
+            )
             save_result(result['image'], out_dir / f'{path.stem}.{args.output_format}')
         except SystemExit as exc:  # erros HTTP/conexão de uma imagem não param o lote
             print(f'Falhou: {exc}')

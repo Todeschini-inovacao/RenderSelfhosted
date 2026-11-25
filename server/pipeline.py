@@ -16,7 +16,12 @@ class Pipeline(Protocol):
         """Carrega pesos. Pode demorar minutos; roda fora do event loop."""
 
     def generate(
-        self, image: Image.Image, prompt: str, scene_type: str, seed: int | None = None
+        self,
+        image: Image.Image,
+        prompt: str,
+        scene_type: str,
+        seed: int | None = None,
+        negative_prompt: str = ' ',
     ) -> Image.Image:
         """Gera o render. Bloqueante; roda fora do event loop."""
 

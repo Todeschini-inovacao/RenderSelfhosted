@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # strict_plus = STRICT_PROMPT + a descrição da cena (campo sceneDescription, gerada pela
     # análise de imagem do Render). Sem descrição na requisição, fica igual ao strict.
     PROMPT_MODE: Literal['request', 'strict', 'strict_plus'] = 'request'
+    # Prompt negativo padrão (a requisição pode sobrescrever com "negativePrompt"). Só tem
+    # efeito sem Lightning (true_cfg_scale > 1); vazio = ' ', o neutro do model card.
+    NEGATIVE_PROMPT: str = ''
     MAX_SIDE: int = 1536
     # original = entrega no tamanho exato da imagem de entrada (server/upscale.py);
     # model = como o Qwen gerou (~1 MP, ex.: 1376x768).
@@ -139,6 +142,12 @@ def resolve_prompt(
     if not description:
         return base
     return f'{base}\n\n{SCENE_DESCRIPTION_PREFIX}{description}'
+
+
+def resolve_negative_prompt(request_negative: str | None, settings: 'Settings') -> str:
+    """Prompt negativo que vai pro modelo: o da requisição, senão NEGATIVE_PROMPT, senão ' '."""
+    text = request_negative if request_negative is not None else settings.NEGATIVE_PROMPT
+    return text.strip() or ' '
 
 
 settings = Settings()
